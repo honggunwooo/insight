@@ -1,0 +1,33 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Env (비밀키)
+.env
+.env.*
+!.env.example
+client/.env
+client/.env.*
+!client/.env.example
+server/.env
+server/.env.*
+!server/.env.example
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# IDE/OS 잡파일
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+~$*
+
+# Vite/Etc
+.vite/
