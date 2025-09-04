@@ -1,0 +1,6 @@
+node_modules/
+Insight(backend)/node_modules/ Insight(frontend)/node_modules/
+dist/
+**/dist/
+.env
+Insight(backend)/.env Insight(frontend)/.env
