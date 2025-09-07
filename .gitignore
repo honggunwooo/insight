@@ -1,6 +1,5 @@
 node_modules/
-Insight(backend)/node_modules/ Insight(frontend)/node_modules/
-dist/
+**/node_modules/
 **/dist/
 .env
-Insight(backend)/.env Insight(frontend)/.env
+**/.env
