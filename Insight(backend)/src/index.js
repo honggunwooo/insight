@@ -1,28 +1,56 @@
-// src/routes/messages.js
+require('dotenv').config();
 const express = require('express');
-module.exports = (pool) => {
-  const r = express.Router();
-  r.get('/messages', async (req, res) => {
-    if (!pool) return res.json([]);
-    const ch = String(req.query.channel || 'general').trim();
-    const limit = Math.min(parseInt(req.query.limit || '30', 10), 100);
-    const before = req.query.before || null;
-    const { rows } = await pool.query(
-      `SELECT id, channel, content, created_at
-         FROM messages
-        WHERE channel = $1
-          AND ($2::timestamptz IS NULL OR created_at < $2)
-        ORDER BY created_at DESC
-        LIMIT $3`,
-      [ch, before, limit]
-    );
-    res.json(rows);
-  });
-  return r;
-};
-// touch: Fri, Sep  5, 2025  1:21:16 AM
-// touch: Fri, Sep  5, 2025  1:21:30 AM
-// commit test Fri, Sep  5, 2025  1:25:30 AM
-// test-commit %date% %time%
-// commit test Fri, Sep  5, 2025  1:51:29 AM
-// commit test Fri, Sep  5, 2025  1:52:00 AM
+const http = require('http');
+const cors = require('cors');
+const morgan = require('morgan');
+const { Server } = require('socket.io');
+const rateLimit = require('express-rate-limit'); // v6 사용
+const helmet = require('helmet');
+
+const { pool, ensureTables } = require('./db');
+const { attachSocket } = require('./socket');
+const messagesRouter = require('./routes/messages');
+
+const app = express();
+
+// 기본 보안/공통 미들웨어
+app.use(helmet());
+app.use(cors({ origin: process.env.CORS_ORIGIN || '*', methods: ['GET', 'POST'] }));
+app.use(rateLimit({ windowMs: 15 * 1000, max: 150 })); // 15초 150요청/IP
+app.use(morgan('dev'));
+app.use(express.json());
+
+// 핑(헬스)
+app.get('/', (_req, res) => res.json({ ok: true, name: 'Insight API' }));
+
+// DB 준비
+ensureTables().catch((err) => console.error('[ensureTables]', err));
+
+// 라우터 (pool 주입)
+app.use(messagesRouter(pool));
+
+// DB 헬스체크
+app.get('/db/health', async (_req, res) => {
+  if (!pool) return res.json({ db: false, reason: 'no DATABASE_URL' });
+  try {
+    const now = await pool.query('SELECT now() AS now');
+    const cnt = await pool.query('SELECT COUNT(*)::int AS messages FROM messages');
+    res.json({ db: true, now: now.rows[0].now, messages: cnt.rows[0].messages });
+  } catch (e) {
+    res.status(500).json({ db: false, error: e.message });
+  }
+});
+
+// 파비콘 204
+app.get('/favicon.ico', (_req, res) => res.sendStatus(204));
+
+// Socket.IO 부착
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: { origin: process.env.CORS_ORIGIN || '*', methods: ['GET', 'POST'] }
+});
+attachSocket(io, pool);
+
+// 시작
+const port = process.env.PORT || 4000;
+server.listen(port, () => console.log(`Server running on http://localhost:${port}`));

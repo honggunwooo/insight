@@ -39,12 +39,13 @@ function attachSocket(io, pool) {
     });
 
     // 메시지 전송 -> (레이트리밋/검증) -> DB 저장 -> 같은 채널 브로드캐스트
-    socket.on('send_message', async ({ channel, content }, ack) => {
+    socket.on('send_message', async ({ channel, content, author }, ack) => {
       try {
         // ---- 1) 채널/내용 정리 & 기본 검증 ----
         const ch   = String(channel || '').slice(0, MAX_CH_LEN).trim();
         const text = String(content || '').trim().slice(0, MAX_MSG_LEN);
-        if (!ch || !text) return ack?.({ ok: false, error: 'empty' });
+        const name = String(author || '').trim().slice(0, 30);
+        if (!ch || !text || !name) return ack?.({ ok: false, error: 'empty' });
 
         // ---- 2) 레이트리밋(토큰 버킷) ----
         const b = refillBucket(socket.id);
@@ -63,20 +64,21 @@ function attachSocket(io, pool) {
         let msg;
         if (pool) {
           const { rows } = await pool.query(
-            `INSERT INTO messages(channel, content)
-             VALUES ($1, $2)
-             RETURNING id, channel, content, created_at`,
-            [ch, text]
+            `INSERT INTO messages(channel, content, author)
+             VALUES ($1, $2, $3)
+             RETURNING id, channel, content, author, created_at`,
+            [ch, text, name]
           );
           const r = rows[0];
           msg = {
             id: r.id,
             channel: r.channel,
             content: r.content,
+            author: r.author,
             createdAt: r.created_at.toISOString(),
           };
         } else {
-          msg = { id: Date.now(), channel: ch, content: text, createdAt: new Date().toISOString() };
+          msg = { id: Date.now(), channel: ch, content: text, author: name, createdAt: new Date().toISOString() };
         }
 
         // ---- 5) 같은 채널로 브로드캐스트 ----
