@@ -34,3 +34,5 @@ async function ensureTables() {
 }
 
 module.exports = { pool, ensureTables };
+
+console.log('DB module loaded');
