@@ -3,14 +3,10 @@ const express = require('express');
 module.exports = (pool) => {
   const router = express.Router();
 
-  // ======================
-  // 채널 관련 API
-  // ======================
-
   // 채널 목록 조회 API
   router.get('/channels', async (req, res) => {
     try {
-      const { rows } = await pool.query(`
+      const [rows] = await pool.query(`
         SELECT name FROM channels ORDER BY name
       `);
       res.json(rows.map(r => r.name));
@@ -29,7 +25,7 @@ module.exports = (pool) => {
 
     try {
       await pool.query(
-        `INSERT INTO channels (name) VALUES ($1) ON CONFLICT DO NOTHING`,
+        `INSERT IGNORE INTO channels (name) VALUES (?)`,
         [name.trim()]
       );
       res.json({ ok: true });
@@ -39,27 +35,34 @@ module.exports = (pool) => {
     }
   });
 
+  // 메시지 조회 API
   router.get('/messages', async (req, res) => {
     try {
       const { channel, limit = 50, before } = req.query;
 
-      const sql = `
+      let sql = `
         SELECT id, channel, content, author, created_at
         FROM messages
-        WHERE channel = $1
-        ${before ? 'AND created_at < $2' : ''}
-        ORDER BY created_at DESC
-        LIMIT $${before ? 3 : 2}
+        WHERE channel = ?
       `;
-      const params = before ? [channel, before, limit] : [channel, limit];
-      const { rows } = await pool.query(sql, params);
+      const params = [channel];
+
+      if (before) {
+        sql += ` AND created_at < ?`;
+        params.push(before);
+      }
+
+      sql += ` ORDER BY created_at DESC LIMIT ?`;
+      params.push(Number(limit));
+
+      const [rows] = await pool.query(sql, params);
 
       const messages = rows.map(r => ({
         id: r.id,
         channel: r.channel,
         content: r.content,
         author: r.author,
-        createdAt: r.created_at.toISOString(),
+        createdAt: r.created_at, // MySQL은 JS Date로 반환됨
       }));
 
       res.json(messages);

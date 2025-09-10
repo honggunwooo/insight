@@ -1,38 +1,22 @@
-const { Pool } = require('pg');
+const mysql = require('mysql2/promise');
+require('dotenv').config();
 
-function makePool() {
-  const url = process.env.DATABASE_URL || '';
-  if (!url) return null;
+const pool = mysql.createPool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASS,  // ✅ 반드시 password로 전달
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT
+});
 
-  let isLocal = false;
+async function testConnection() {
   try {
-    const { hostname } = new URL(url);
-    isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
-  } catch { /* ignore malformed URL */ }
-
-  // 로컬은 SSL X, 클라우드는 SSL O
-  return isLocal
-    ? new Pool({ connectionString: url })
-    : new Pool({ connectionString: url, ssl: { rejectUnauthorized: false } });
+    const conn = await pool.getConnection();
+    console.log("✅ DB 연결 성공");
+    conn.release();
+  } catch (err) {
+    console.error("❌ DB 연결 실패:", err.message);
+  }
 }
 
-const pool = makePool();
-
-async function ensureTables() {
-  if (!pool) { console.log('DB OFF (no DATABASE_URL)'); return; }
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS messages (
-      id BIGSERIAL PRIMARY KEY,
-      channel  TEXT NOT NULL,
-      content  TEXT NOT NULL CHECK (char_length(content) <= 1000),
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-    CREATE INDEX IF NOT EXISTS idx_messages_ch_created
-      ON messages(channel, created_at DESC);
-  `);
-  console.log('DB ready');
-}
-
-module.exports = { pool, ensureTables };
-
-console.log('DB module loaded');
+module.exports = { pool, testConnection };

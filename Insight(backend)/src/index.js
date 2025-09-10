@@ -4,10 +4,10 @@ const http = require('http');
 const cors = require('cors');
 const morgan = require('morgan');
 const { Server } = require('socket.io');
-const rateLimit = require('express-rate-limit'); // v6 사용
+const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 
-const { pool, ensureTables } = require('./db');
+const { pool, testConnection } = require('./db'); // ✅ MySQL용
 const { attachSocket } = require('./socket');
 const messagesRouter = require('./routes/messages');
 
@@ -16,26 +16,23 @@ const app = express();
 // 기본 보안/공통 미들웨어
 app.use(helmet());
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*', methods: ['GET', 'POST'] }));
-app.use(rateLimit({ windowMs: 15 * 1000, max: 150 })); // 15초 150요청/IP
+app.use(rateLimit({ windowMs: 15 * 1000, max: 150 }));
 app.use(morgan('dev'));
 app.use(express.json());
 
 // 핑(헬스)
 app.get('/', (_req, res) => res.json({ ok: true, name: 'Insight API' }));
 
-// DB 준비
-ensureTables().catch((err) => console.error('[ensureTables]', err));
-
 // 라우터 (pool 주입)
 app.use(messagesRouter(pool));
 
-// DB 헬스체크
+// DB 헬스체크 (MySQL용 쿼리로 수정)
 app.get('/db/health', async (_req, res) => {
   if (!pool) return res.json({ db: false, reason: 'no DATABASE_URL' });
   try {
-    const now = await pool.query('SELECT now() AS now');
-    const cnt = await pool.query('SELECT COUNT(*)::int AS messages FROM messages');
-    res.json({ db: true, now: now.rows[0].now, messages: cnt.rows[0].messages });
+    const [now] = await pool.query('SELECT NOW() AS now');
+    const [cnt] = await pool.query('SELECT COUNT(*) AS messages FROM messages');
+    res.json({ db: true, now: now[0].now, messages: cnt[0].messages });
   } catch (e) {
     res.status(500).json({ db: false, error: e.message });
   }
@@ -53,4 +50,7 @@ attachSocket(io, pool);
 
 // 시작
 const port = process.env.PORT || 4000;
-server.listen(port, () => console.log(`Server running on http://localhost:${port}`));
+server.listen(port, async () => {
+  console.log(`Server running on http://localhost:${port}`);
+  await testConnection(); // DB 연결 테스트 실행
+});
