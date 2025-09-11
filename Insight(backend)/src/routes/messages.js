@@ -6,9 +6,9 @@ module.exports = (pool) => {
   // 채널 목록 조회 API
   router.get('/channels', async (req, res) => {
     try {
-      const [rows] = await pool.query(`
-        SELECT name FROM channels ORDER BY name
-      `);
+      const [rows] = await pool.query(
+        `SELECT name FROM channels ORDER BY name`
+      );
       res.json(rows.map(r => r.name));
     } catch (err) {
       console.error('[GET /channels error]', err);
@@ -62,7 +62,7 @@ module.exports = (pool) => {
         channel: r.channel,
         content: r.content,
         author: r.author,
-        createdAt: r.created_at, // MySQL은 JS Date로 반환됨
+        createdAt: r.created_at, 
       }));
 
       res.json(messages);

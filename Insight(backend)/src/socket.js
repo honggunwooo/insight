@@ -63,11 +63,16 @@ function attachSocket(io, pool) {
         // ---- 4) DB 저장 또는 임시 메시지 생성 ----
         let msg;
         if (pool) {
-          const { rows } = await pool.query(
-            `INSERT INTO messages(channel, content, author)
-             VALUES ($1, $2, $3)
-             RETURNING id, channel, content, author, created_at`,
+          // MySQL: use ? placeholders and fetch inserted row by insertId
+          const [insertResult] = await pool.query(
+            `INSERT INTO messages (channel, content, author) VALUES (?, ?, ?)`,
             [ch, text, name]
+          );
+          const insertedId = insertResult.insertId;
+
+          const [rows] = await pool.query(
+            `SELECT id, channel, content, author, created_at FROM messages WHERE id = ?`,
+            [insertedId]
           );
           const r = rows[0];
           msg = {
@@ -75,7 +80,7 @@ function attachSocket(io, pool) {
             channel: r.channel,
             content: r.content,
             author: r.author,
-            createdAt: r.created_at.toISOString(),
+            createdAt: (r.created_at && r.created_at.toISOString) ? r.created_at.toISOString() : r.created_at,
           };
         } else {
           msg = { id: Date.now(), channel: ch, content: text, author: name, createdAt: new Date().toISOString() };

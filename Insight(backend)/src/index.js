@@ -1,4 +1,5 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
@@ -7,7 +8,7 @@ const { Server } = require('socket.io');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 
-const { pool, testConnection } = require('./db'); // ✅ MySQL용
+const { pool, testConnection } = require('./db');
 const { attachSocket } = require('./socket');
 const messagesRouter = require('./routes/messages');
 
