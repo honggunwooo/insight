@@ -35,6 +35,27 @@ module.exports = (pool) => {
     }
   });
 
+  // 새 메시지 추가 API
+router.post('/messages', async (req, res) => {
+  const { channel, content, author } = req.body;
+
+  if (!channel || !content || !author) {
+    return res.status(400).json({ error: "missing-fields" });
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO messages (channel, content, author, created_at)
+       VALUES (?, ?, ?, NOW())`,
+      [channel, content, author]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[POST /messages error]', err);
+    res.status(500).json({ error: 'db-fail' });
+  }
+});
+
   // 메시지 조회 API
   router.get('/messages', async (req, res) => {
     try {

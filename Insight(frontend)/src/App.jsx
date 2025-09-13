@@ -9,9 +9,16 @@ export default function App() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
   const [status, setStatus] = useState("disconnected");
+  const [loading, setLoading] = useState(true); // 첫 진입 로딩
+  const [readyChannels, setReadyChannels] = useState(false);
+  const [readyHistory, setReadyHistory] = useState(false);
   const [nickname, setNickname] = useState(localStorage.getItem("nickname") || ""); // ✅ 닉네임 상태
+  const [mobileOpen, setMobileOpen] = useState(false); // 모바일 사이드바
+  const [splashShow, setSplashShow] = useState(true);  // 스플래시 표시 여부
+  const [splashHide, setSplashHide] = useState(false); // 스플래시 페이드아웃
   const socketRef = useRef(null);
   const endRef = useRef(null);
+  const brandRef = useRef(null);     // 상단 타깃 로고
 
   // ✅ 닉네임 입력 (최초 1번)
   useEffect(() => {
@@ -30,7 +37,6 @@ export default function App() {
     s.on("connect", () => {
       setStatus("connected");
       s.emit("join_channel", { channel });
-      loadHistory(channel);
     });
     s.on("connect_error", () => setStatus("error"));
     s.on("new_message", (m) => {
@@ -53,7 +59,10 @@ export default function App() {
   useEffect(() => {
     fetch(`${API_URL}/channels`)
       .then((res) => res.json())
-      .then(setChannels)
+      .then((list) => {
+        setChannels(list);
+        setReadyChannels(true);
+      })
       .catch(console.error);
   }, []);
 
@@ -65,10 +74,25 @@ export default function App() {
       const data = await res.json(); // 서버는 최신순 → 화면은 오래된순
       setMessages(data.slice().reverse());
       setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 0);
+      if (!readyHistory) setReadyHistory(true);
     } catch (e) {
       console.error(e);
     }
   }
+
+  // 모든 초기 준비 완료 시, 로딩 해제(부드러운 전환을 위해 약간 딜레이)
+  useEffect(() => {
+    if (status === "connected" && readyChannels && readyHistory) {
+      const t = setTimeout(() => setLoading(false), 450);
+      return () => clearTimeout(t);
+    }
+  }, [status, readyChannels, readyHistory]);
+
+  // 스플래시: 잠깐 보였다가 자연스럽게 사라짐
+  useEffect(() => {
+    const t = setTimeout(() => setSplashHide(true), 850);
+    return () => clearTimeout(t);
+  }, []);
 
   function send() {
     const text = input.trim();
@@ -82,35 +106,46 @@ export default function App() {
   }
 
   return (
-    <div style={{ maxWidth: 960, margin: "24px auto", fontFamily: "system-ui" }}>
-      <h1>
-        Insight{" "}
-        <small
-          style={{
-            color: status === "connected" ? "green" : "#999",
-            fontSize: 12,
-          }}
-        >
-          ● {status}
-        </small>
-      </h1>
+    <div className={`shell ${!loading ? "fade-in" : ""} ${mobileOpen ? "mobile-open" : ""}`}>
+      {/* Splash: 잠깐 보였다가 자연스럽게 페이드아웃 */}
+      {splashShow && (
+        <div className={`splash ${splashHide ? 'hide' : ''}`} onTransitionEnd={() => setSplashShow(false)}>
+          <div className="splash__card center-stack">
+            <div className="logo-box"><div className="logo-mark big">Insight</div></div>
+            <div className="spinner-dots" aria-label="loading">
+              <span className="dot" />
+              <span className="dot" />
+              <span className="dot" />
+            </div>
+          </div>
+        </div>
+      )}
 
-      <div style={{ display: "flex", border: "1px solid #ddd" }}>
+      {/* 상단 바 */}
+      <header className="topbar glass card">
+        <div ref={brandRef} className="brand-box"><span className="brand">Insight</span></div>
+        <div className="topbar-right">
+          <button className="hamburger" aria-label="toggle menu" onClick={() => setMobileOpen(v => !v)}>
+            <span/>
+            <span/>
+            <span/>
+          </button>
+          <span className={`status-pill ${status}`}>{status}</span>
+          {nickname && <span className="nick">{nickname}</span>}
+        </div>
+      </header>
+
+      {mobileOpen && <div className="backdrop" onClick={() => setMobileOpen(false)} />}
+
+      <div className="panel glass card">
         {/* ✅ 사이드바 */}
-        <div style={{ width: 200, borderRight: "1px solid #ddd", padding: 8 }}>
-          <h3>Channels</h3>
+        <aside className="sidebar" onClick={() => setMobileOpen(false)}>
+          <h3 className="muted" style={{ fontSize: 14, margin: '6px 0 10px' }}>Channels</h3>
           <ul style={{ listStyle: "none", padding: 0 }}>
             {channels.map((ch) => (
               <li key={ch}>
                 <button
-                  style={{
-                    background: ch === channel ? "#eee" : "transparent",
-                    border: "none",
-                    cursor: "pointer",
-                    padding: "4px 8px",
-                    textAlign: "left",
-                    width: "100%",
-                  }}
+                  className={`chan-btn ${ch === channel ? "active" : ""}`}
                   onClick={() => setChannel(ch)}
                 >
                   # {ch}
@@ -123,7 +158,7 @@ export default function App() {
           <input
             type="text"
             placeholder="새 채널 입력 후 Enter"
-            style={{ width: "100%", marginTop: 8 }}
+            className="input"
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 const newCh = e.target.value.trim();
@@ -135,50 +170,38 @@ export default function App() {
               }
             }}
           />
-        </div>
+        </aside>
 
         {/* ✅ 채팅 영역 */}
-        <div style={{ flex: 1, padding: 12, display: "flex", flexDirection: "column" }}>
+        <main className="content">
           {/* 메시지 리스트 */}
-          <div
-            style={{
-              flex: 1,
-              overflow: "auto",
-              border: "1px solid #ddd",
-              padding: 8,
-              marginBottom: 8,
-              height: 420,
-            }}
-          >
+          <div className="messages">
             {messages.map((m) => (
               <div
                 key={m.id}
-                style={{
-                  padding: "4px 0",
-                  textAlign: m.author === nickname ? "right" : "left",
-                }}
+                className={`message ${m.author === nickname ? "me" : ""}`}
               >
-                <strong style={{ color: "#555" }}>
-                  {m.author || "익명"}
-                </strong>
-                : {m.content}
+                <div className="bubble">
+                  <div className="meta">{m.author || "익명"}</div>
+                  <div className="text">{m.content}</div>
+                </div>
               </div>
             ))}
             <div ref={endRef} />
           </div>
 
           {/* 입력창 */}
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="input-row">
             <input
-              style={{ flex: 1 }}
+              className="input"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && send()}
               placeholder="메시지 입력"
             />
-            <button onClick={send}>보내기</button>
+            <button className="btn primary" onClick={send}>보내기</button>
           </div>
-        </div>
+        </main>
       </div>
     </div>
   );
