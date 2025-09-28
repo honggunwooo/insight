@@ -37,3 +37,6 @@ build/
 # Optional: Mac system files
 .AppleDouble
 .LSOverride
+
+
+/uploads

@@ -6,7 +6,7 @@ const authMiddleware = (req, res, next) => {
   const token = authHeader && authHeader.split(" ")[1];
 
   if (!token) {
-    return res.status(401).json({ message: "토큰이 없음. 접근이 거부됨 ㅋ." });
+    return res.status(401).json({ message: "토큰이 없음. 접근이 거부됨." });
   }
 
   try {
