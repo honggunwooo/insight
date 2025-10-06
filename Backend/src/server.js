@@ -1,29 +1,42 @@
 const express = require("express");
 const cors = require("cors");
+const http = require("http");
+const { Server } = require("socket.io");
 require("dotenv").config();
 
 const authRoutes = require("./routes/authRoutes");
 const profileRoutes = require("./routes/profileRoutes");
 const authMiddleware = require("./middlewares/jwt");
+const initChatSocket = require("./socket/chatSocket");
+const roomRoutes = require("./routes/roomRoutes");
 
 const app = express();
-
+app.use(cors({ origin: "http://localhost:5173" }));
+app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
-// 미들웨어
-app.use(cors());
-app.use(express.json());
+app.get("/api/protected", authMiddleware, (req, res) => {
+  res.json({ message: "보호된 API 접근 성공", user: req.user });
+});
 
 // 라우터 등록
 app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
+app.use("/api/rooms", roomRoutes);
 
-// 테스트용 보호 라우트
-app.get("/api/protected", authMiddleware, (req, res) => {
-  res.json({ message: "보호된 API 접근 성공!", user: req.user });
+// http 서버와 socket.io 연결
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "http://localhost:5173",
+    methods: ["GET", "POST"],
+  },
 });
 
+// 소켓 이벤트 실행
+initChatSocket(io);
+
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });

@@ -1,10 +1,10 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const pool = require("../config/db"); 
+const pool = require("../config/db");
 
 exports.register = async (req, res) => {
-    // console.log("req.body:",req.body);
-  const { username, email, password } = req.body;
+  // console.log("req.body:",req.body);
+  const { username, email, password, location } = req.body;
   try {
     const [user] = await pool.query("SELECT * FROM users WHERE email = ?", [email]);
     if (user.length > 0) {
@@ -12,12 +12,12 @@ exports.register = async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    await pool.query(
-      "INSERT INTO users (username, email, password) VALUES (?, ?, ?)",
-      [username, email, hashedPassword]
+    const [result] = await pool.query(
+      "INSERT INTO users (username, email, password, location) VALUES (?, ?, ?, ?)",
+      [username, email, hashedPassword, location || null]
     );
 
-    res.status(201).json({ message: "회원가입 성공" });
+    res.status(201).json({ message: "회원가입 성공", userId: result.insertId });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -31,8 +31,8 @@ exports.login = async (req, res) => {
       return res.status(400).json({ message: "이메일이 존재하지 않습니다." });
     }
 
-    const user = rows[0]; 
-    const isMatch = await bcrypt.compare(password, user.password); 
+    const user = rows[0];
+    const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: "비밀번호가 일치하지 않습니다." });
     }
