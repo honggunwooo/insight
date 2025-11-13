@@ -23,14 +23,17 @@ function ChatPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
+  const navigatedRef = useRef(false);
+  const lastSetRoomRef = useRef(null);
+
   const axiosAuthConfig = useMemo(() => {
     const token = tokenRef.current;
     return token
       ? {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
       : {};
   }, []);
 
@@ -54,6 +57,10 @@ function ChatPage() {
 
     const newSocket = io(SOCKET_URL, {
       auth: { token },
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
 
     setSocket(newSocket);
@@ -67,9 +74,18 @@ function ChatPage() {
       setStatusMessage({ type: "warning", text: "서버와 연결이 끊어졌습니다. 재연결 중..." });
     };
     const handleUnauthorized = (payload) => {
-      alert(payload.message || "인증에 실패했습니다.");
+      if (navigatedRef.current) return;
+      navigatedRef.current = true;
+
+      const msg = payload?.message || "인증에 실패했습니다. 로그인 페이지로 이동합니다.";
+      alert(msg);
       localStorage.removeItem("token");
-      window.location.href = "/login";
+
+      try {
+        navigate("/login");
+      } catch (e) {
+        window.location.href = "/login";
+      }
     };
     const handleError = (payload) => {
       setStatusMessage({ type: "error", text: payload.message || "알 수 없는 오류가 발생했습니다." });
@@ -80,9 +96,16 @@ function ChatPage() {
       }
       setMessagesByRoom((prev) => {
         const prevMessages = prev[msg.roomId] || [];
+        const updatedMessages = [...prevMessages, msg];
+        // Update localStorage cache
+        try {
+          localStorage.setItem(`messages_room_${msg.roomId}`, JSON.stringify(updatedMessages));
+        } catch (e) {
+          console.error("localStorage 저장 실패", e);
+        }
         return {
           ...prev,
-          [msg.roomId]: [...prevMessages, msg],
+          [msg.roomId]: updatedMessages,
         };
       });
     };
@@ -163,8 +186,28 @@ function ChatPage() {
     }
 
     socket.emit("joinRoom", activeRoomId);
+    console.log(`📩 ${socket.id}가 ${activeRoomId} 방에 입장`);
 
-    if (!messagesLoaded[activeRoomId]) {
+    // Load cached messages from localStorage first
+    const cachedMessages = localStorage.getItem(`messages_room_${activeRoomId}`);
+    if (cachedMessages) {
+      try {
+        const parsedMessages = JSON.parse(cachedMessages);
+        setMessagesByRoom((prev) => ({
+          ...prev,
+          [activeRoomId]: parsedMessages,
+        }));
+        setMessagesLoaded((prev) => ({
+          ...prev,
+          [activeRoomId]: true,
+        }));
+      } catch (e) {
+        console.error("localStorage 메시지 파싱 실패", e);
+      }
+    }
+
+    // Fallback fetch if messages are missing or empty in localStorage
+    if (!messagesLoaded[activeRoomId] || !cachedMessages) {
       const fetchMessages = async () => {
         try {
           const { data } = await axios.get(
@@ -172,10 +215,18 @@ function ChatPage() {
             axiosAuthConfig
           );
 
-          setMessagesByRoom((prev) => ({
-            ...prev,
-            [activeRoomId]: data,
-          }));
+          setMessagesByRoom((prev) => {
+            // Update localStorage cache
+            try {
+              localStorage.setItem(`messages_room_${activeRoomId}`, JSON.stringify(data));
+            } catch (e) {
+              console.error("localStorage 저장 실패", e);
+            }
+            return {
+              ...prev,
+              [activeRoomId]: data,
+            };
+          });
           setMessagesLoaded((prev) => ({
             ...prev,
             [activeRoomId]: true,
@@ -191,8 +242,9 @@ function ChatPage() {
 
     return () => {
       socket.emit("leaveRoom", activeRoomId);
+      console.log(`🚪 ${socket.id}가 ${activeRoomId} 방을 나감`);
     };
-  }, [socket, activeRoomId, axiosAuthConfig, messagesLoaded]);
+  }, [socket, activeRoomId]);
 
   useEffect(() => {
     if (activeMessages.length === 0) {
@@ -209,11 +261,58 @@ function ChatPage() {
       return;
     }
 
-    socket.emit("sendMessage", {
+    const user = JSON.parse(localStorage.getItem("user"));
+    const userId = user?.id;
+
+    const tempId = `temp-${Date.now()}`;
+
+    const newMessage = {
+      id: tempId,
       roomId: activeRoomId,
+      userId: userId,
       content: trimmed,
+      username: currentUser?.username || `유저 ${userId}`,
+      created_at: new Date().toISOString(),
+      temp: true,
+    };
+
+    // Optimistically add message to UI
+    setMessagesByRoom((prev) => {
+      const prevMessages = prev[activeRoomId] || [];
+      const updatedMessages = [...prevMessages, newMessage];
+      try {
+        localStorage.setItem(`messages_room_${activeRoomId}`, JSON.stringify(updatedMessages));
+      } catch (e) {
+        console.error("localStorage 저장 실패", e);
+      }
+      return {
+        ...prev,
+        [activeRoomId]: updatedMessages,
+      };
     });
+
     setMessage("");
+
+    // Emit message to server
+    socket.emit("sendMessage", newMessage, (response) => {
+      // On server confirmation, replace temp message with confirmed message
+      if (response && response.id) {
+        setMessagesByRoom((prev) => {
+          const prevMessages = prev[activeRoomId] || [];
+          const filteredMessages = prevMessages.filter((msg) => msg.id !== tempId);
+          const updatedMessages = [...filteredMessages, response];
+          try {
+            localStorage.setItem(`messages_room_${activeRoomId}`, JSON.stringify(updatedMessages));
+          } catch (e) {
+            console.error("localStorage 저장 실패", e);
+          }
+          return {
+            ...prev,
+            [activeRoomId]: updatedMessages,
+          };
+        });
+      }
+    });
   };
 
   const handleSelectRoom = (roomId) => {
@@ -233,10 +332,12 @@ function ChatPage() {
     }
   };
 
-  const renderMessage = (msg) => {
+  const renderMessage = (msg, index) => {
     const isOwn = currentUser && msg.userId === currentUser.id;
+    const uniqueKey = msg.id || `${msg.userId || "anon"}-${msg.created_at || Date.now()}-${index}`;
+
     return (
-      <div key={msg.id || `${msg.userId}-${msg.created_at}`} className={`chat-message ${isOwn ? "chat-message--own" : ""}`}>
+      <div key={uniqueKey} className={`chat-message ${isOwn ? "chat-message--own" : ""}`}>
         <div className="chat-message-header">
           <span className="chat-message-user">{msg.username || `유저 ${msg.userId}`}</span>
           <span className="chat-message-time">{formatTimestamp(msg.created_at)}</span>
@@ -247,16 +348,15 @@ function ChatPage() {
   };
 
   useEffect(() => {
-    if (!activeRoomId) {
-      return;
-    }
+    if (!activeRoomId) return;
 
     const currentParam = searchParams.get("roomId");
-    if (currentParam === String(activeRoomId)) {
-      return;
-    }
+
+    if (currentParam === String(activeRoomId)) return;
+
     setSearchParams({ roomId: String(activeRoomId) }, { replace: true });
-  }, [activeRoomId, setSearchParams, searchParams]);
+
+  }, [activeRoomId]);
 
   const filteredRooms = rooms.filter((room) => {
     if (!roomSearch.trim()) {
@@ -268,6 +368,26 @@ function ChatPage() {
       (room.description ? room.description.toLowerCase().includes(keyword) : false)
     );
   });
+
+  useEffect(() => {
+    if (!socket) return;
+    const handleUpdateMessages = (msgs) => {
+      console.log("📩 서버에서 불러온 메시지:", msgs);
+      setMessagesByRoom((prev) => ({
+        ...prev,
+        [activeRoomId]: msgs,
+      }));
+      try {
+        localStorage.setItem(`messages_room_${activeRoomId}`, JSON.stringify(msgs));
+      } catch (e) {
+        console.error("localStorage 저장 실패", e);
+      }
+    };
+    socket.on("updateMessages", handleUpdateMessages);
+    return () => {
+      socket.off("updateMessages", handleUpdateMessages);
+    };
+  }, [socket, activeRoomId]);
 
   return (
     <div className="chat-layout">
