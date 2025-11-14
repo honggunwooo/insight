@@ -1,20 +1,21 @@
-import { Routes, Route } from "react-router-dom";
-import Navbar from "./components/Navbar";
-import LoginPage from "./pages/LoginPage";
-import SignupPage from "./pages/SignupPage";
-import MainPage from "./pages/MainPage";
-import ChatPage from "./pages/ChatPage";
-import ProfilePage from "./pages/ProfilePage";
-import ChannelCreatePage from "./pages/ChannelCreatePage";
-import ProtectedRoute from "./components/ProtectedRoute";
+import { Routes, Route, Navigate } from "react-router-dom";
+import Navbar from "./components/Navbar.jsx";
+import LoginPage from "./pages/LoginPage.jsx";
+import SignupPage from "./pages/SignupPage.jsx";
+import MainPage from "./pages/MainPage.jsx";
+import ChatPage from "./pages/ChatPage.jsx";
+import ProfilePage from "./pages/ProfilePage.jsx";
+import ChannelCreatePage from "./pages/ChannelCreatePage.jsx";
+import RoomList from "./pages/RoomList.jsx";
+import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import "./index.css";
 import "./App.css";
 
 function App() {
   return (
-    <div className="app-container">
+    <div className="app-shell">
       <Navbar />
-      <div className="page-content">
+      <main className="app-main">
         <Routes>
           <Route path="/" element={<MainPage />} />
           <Route path="/login" element={<LoginPage />} />
@@ -43,8 +44,17 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/rooms/manage"
+            element={
+              <ProtectedRoute>
+                <RoomList />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </div>
+      </main>
     </div>
   );
 }

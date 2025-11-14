@@ -2,58 +2,50 @@ import React, { useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 
+const trimTrailingSlash = (value) => value?.replace(/\/+$/, "") || "";
+const ensureLeadingSlash = (value) =>
+  value ? (value.startsWith("/") ? value : `/${value}`) : "";
+const API_BASE_URL =
+  trimTrailingSlash(import.meta.env.VITE_API_BASE_URL) ||
+  "http://localhost:4000";
+const API_PREFIX =
+  ensureLeadingSlash(
+    trimTrailingSlash(import.meta.env.VITE_API_PREFIX || "/api/v1")
+  ) || "";
+const CREATE_ROOM_ROUTE = `${API_BASE_URL}${API_PREFIX}/rooms`;
+
 function ChannelCreatePage() {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ name: "", description: "" });
+  const [name, setName] = useState("");
   const [status, setStatus] = useState(null);
-
-  const token = localStorage.getItem("token");
-
-  const handleChange = (event) => {
-    const { name, value } = event.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
-  };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
 
-    if (!token) {
-      setStatus({ type: "error", message: "로그인 정보가 만료되었습니다. 다시 로그인해주세요." });
-      setTimeout(() => navigate("/login"), 500);
+    if (!name.trim()) {
+      setStatus({ type: "error", message: "채널 이름을 입력해주세요." });
       return;
     }
 
-    if (!form.name.trim()) {
-      setStatus({ type: "error", message: "채널 이름을 입력해주세요." });
+    if (!CREATE_ROOM_ROUTE) {
+      setStatus({ type: "error", message: "CREATE_ROOM_ROUTE를 먼저 설정해주세요." });
       return;
     }
 
     setStatus({ type: "loading", message: "채널을 생성하고 있습니다..." });
 
     try {
-      const { data } = await axios.post(
-        "http://localhost:4000/api/rooms",
+      const token = localStorage.getItem("token");
+      await axios.post(
+        CREATE_ROOM_ROUTE,
+        { name: name.trim() },
         {
-          name: form.name.trim(),
-          description: form.description.trim() || null,
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
         }
       );
-
-      const createdRoomId = data?.roomId;
       setStatus({ type: "success", message: "채널이 성공적으로 생성되었습니다!" });
-
-      setTimeout(() => {
-        if (createdRoomId) {
-          navigate(`/chat?roomId=${createdRoomId}`);
-        } else {
-          navigate("/chat");
-        }
-      }, 600);
+      setTimeout(() => navigate("/chat"), 600);
     } catch (err) {
-      console.error("채널 생성 실패", err);
       setStatus({
         type: "error",
         message: err.response?.data?.message || "채널 생성 중 오류가 발생했습니다.",
@@ -75,22 +67,10 @@ function ChannelCreatePage() {
             채널 이름
             <input
               type="text"
-              name="name"
-              value={form.name}
-              onChange={handleChange}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
               placeholder="예: 마포구-맛집"
               required
-            />
-          </label>
-
-          <label className="channel-create-label">
-            채널 소개 (선택)
-            <textarea
-              name="description"
-              value={form.description}
-              onChange={handleChange}
-              placeholder="채널에서 어떤 이야기를 나눌지 소개를 작성해보세요."
-              rows={3}
             />
           </label>
 

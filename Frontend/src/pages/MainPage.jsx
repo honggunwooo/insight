@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 
 function MainPage() {
   const navigate = useNavigate();
-  const token = localStorage.getItem("token");
+  const hasToken =
+    typeof window !== "undefined" ? Boolean(localStorage.getItem("token")) : false;
 
   return (
     <div className="home-container">
@@ -15,7 +16,7 @@ function MainPage() {
         </p>
 
         <div className="home-actions">
-          {token ? (
+          {hasToken ? (
             <>
               <button className="btn btn-primary" onClick={() => navigate("/chat")}>
                 💬 채팅 시작하기

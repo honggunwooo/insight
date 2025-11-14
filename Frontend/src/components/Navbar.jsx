@@ -1,70 +1,74 @@
 import React from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
+
+const links = [
+  { to: "/", label: "홈" },
+  { to: "/chat", label: "채팅" },
+  { to: "/channels/new", label: "채널 만들기", private: true },
+  { to: "/rooms/manage", label: "방 관리", private: true },
+];
 
 function Navbar() {
   const navigate = useNavigate();
-  const token = localStorage.getItem("token");
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("token") : null;
 
   const handleLogout = () => {
     localStorage.removeItem("token");
-    alert("로그아웃되었습니다!");
     navigate("/login");
   };
 
   return (
-    <nav style={styles.navbar}>
-      <h2 style={styles.logo}>Insight 🌐</h2>
-      <div style={styles.links}>
-        <Link to="/" style={styles.link}>홈</Link>
+    <header className="shell-nav">
+      <div className="shell-brand">
+        <Link to="/" className="shell-logo">
+          Insight
+          <span className="shell-logo-glow" aria-hidden="true">
+            ●
+          </span>
+        </Link>
+        <span className="shell-pill">Neighbourhood Live</span>
+      </div>
 
-        {!token ? (
+      <nav className="shell-links">
+        {links
+          .filter((link) => (link.private ? Boolean(token) : true))
+          .map((link) => (
+            <NavLink
+              key={link.to}
+              to={link.to}
+              className={({ isActive }) =>
+                `shell-link${isActive ? " is-active" : ""}`
+              }
+            >
+              {link.label}
+            </NavLink>
+          ))}
+      </nav>
+
+      <div className="shell-user">
+        {token ? (
           <>
-            <Link to="/login" style={styles.link}>로그인</Link>
-            <Link to="/signup" style={styles.link}>회원가입</Link>
+            <Link to="/profile" className="shell-link shell-link--ghost">
+              마이페이지
+            </Link>
+            <button type="button" className="btn btn-outline" onClick={handleLogout}>
+              로그아웃
+            </button>
           </>
         ) : (
           <>
-            <Link to="/profile" style={styles.link}>마이페이지</Link>
-            <button onClick={handleLogout} style={styles.logoutBtn}>로그아웃</button>
+            <Link to="/login" className="shell-link shell-link--ghost">
+              로그인
+            </Link>
+            <Link to="/signup" className="btn btn-primary">
+              회원가입
+            </Link>
           </>
         )}
       </div>
-    </nav>
+    </header>
   );
 }
-
-const styles = {
-  navbar: {
-    backgroundColor: "#ffefb0",
-    padding: "10px 20px",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderBottom: "2px solid #f2c94c",
-  },
-  logo: {
-    margin: 0,
-    fontWeight: "bold",
-    color: "#333",
-  },
-  links: {
-    display: "flex",
-    gap: "15px",
-    alignItems: "center",
-  },
-  link: {
-    textDecoration: "none",
-    color: "#333",
-    fontWeight: "bold",
-  },
-  logoutBtn: {
-    background: "#f57c00",
-    color: "white",
-    border: "none",
-    padding: "6px 12px",
-    borderRadius: "6px",
-    cursor: "pointer",
-  },
-};
 
 export default Navbar;

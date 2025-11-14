@@ -1,400 +1,325 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import axios from "axios";
 import { io } from "socket.io-client";
 
-const SOCKET_URL = "http://localhost:4000";
+const formatMessageTime = (value) =>
+  new Intl.DateTimeFormat("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+
+const formatFeedTime = (value) =>
+  new Intl.DateTimeFormat("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(value));
+
+const trimTrailingSlash = (value) => value?.replace(/\/+$/, "") || "";
+const ensureLeadingSlash = (value) =>
+  value ? (value.startsWith("/") ? value : `/${value}`) : "";
+
+const API_BASE_URL =
+  trimTrailingSlash(import.meta.env.VITE_API_BASE_URL) ||
+  "http://localhost:4000";
+const API_PREFIX =
+  ensureLeadingSlash(
+    trimTrailingSlash(import.meta.env.VITE_API_PREFIX || "/api/v1")
+  ) || "";
+const buildApiUrl = (path) =>
+  `${API_BASE_URL}${API_PREFIX}${ensureLeadingSlash(path)}`;
+
+const SOCKET_SERVER_URL =
+  trimTrailingSlash(import.meta.env.VITE_SOCKET_URL) || API_BASE_URL;
+const ROUTES = {
+  me: buildApiUrl("/users/me"),
+  rooms: buildApiUrl("/rooms"),
+  createRoom: buildApiUrl("/rooms"),
+};
+
+const ROOM_MESSAGES_ROUTE = (roomId) =>
+  buildApiUrl(`/rooms/${roomId}/messages`);
+
+const normalizeMessage = (message, fallbackRoomId = null) => {
+  if (!message) return null;
+  return {
+    id: message.id,
+    roomId: message.roomId ?? message.room_id ?? fallbackRoomId,
+    userId: message.userId ?? message.user_id,
+    username: message.username ?? message.nickname ?? "이웃",
+    content: message.content,
+    createdAt: message.createdAt ?? message.created_at ?? new Date().toISOString(),
+  };
+};
+
+const normalizeMessages = (items = [], roomId = null) =>
+  items
+    .map((message) => normalizeMessage(message, roomId))
+    .filter(Boolean);
 
 function ChatPage() {
-  const [socket, setSocket] = useState(null);
-  const [isConnected, setIsConnected] = useState(false);
   const [rooms, setRooms] = useState([]);
+  const [search, setSearch] = useState("");
   const [activeRoomId, setActiveRoomId] = useState(null);
-  const [messagesByRoom, setMessagesByRoom] = useState({});
-  const [messagesLoaded, setMessagesLoaded] = useState({});
-  const [message, setMessage] = useState("");
+  const [messages, setMessages] = useState({});
+  const [messageLoading, setMessageLoading] = useState(false);
+  const [roomsLoading, setRoomsLoading] = useState(true);
+  const [composer, setComposer] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [systemFeed, setSystemFeed] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [roomSearch, setRoomSearch] = useState("");
+  const [quickRoomName, setQuickRoomName] = useState("");
+  const [isCreatingRoom, setIsCreatingRoom] = useState(false);
+  const [socketStatus, setSocketStatus] = useState("idle");
   const [currentUser, setCurrentUser] = useState(null);
-  const [statusMessage, setStatusMessage] = useState(null);
 
   const messageListRef = useRef(null);
-  const tokenRef = useRef(localStorage.getItem("token"));
-  const [searchParams, setSearchParams] = useSearchParams();
-  const navigate = useNavigate();
+  const socketRef = useRef(null);
+  const activeRoomRef = useRef(null);
 
-  const navigatedRef = useRef(false);
-  const lastSetRoomRef = useRef(null);
-
-  const axiosAuthConfig = useMemo(() => {
-    const token = tokenRef.current;
-    return token
-      ? {
-        headers: {
-          Authorization: `Bearer ${token}`,
+  const pushSystemMessage = useCallback((entry) => {
+    setSystemFeed((prev) =>
+      [
+        {
+          ...entry,
+          time: entry.time || new Date().toISOString(),
         },
-      }
-      : {};
+        ...prev,
+      ].slice(0, 6)
+    );
   }, []);
-
-  const activeRoom = useMemo(
-    () => rooms.find((room) => room.id === activeRoomId) || null,
-    [rooms, activeRoomId]
-  );
-
-  const activeMessages = activeRoomId ? messagesByRoom[activeRoomId] || [] : [];
 
   const scrollToBottom = useCallback(() => {
-    if (!messageListRef.current) return;
-    messageListRef.current.scrollTo({ top: messageListRef.current.scrollHeight, behavior: "smooth" });
+    if (messageListRef.current) {
+      messageListRef.current.scrollTo({
+        top: messageListRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
   }, []);
 
-  useEffect(() => {
-    const token = tokenRef.current;
-    if (!token) {
+  const authHeaders = () => {
+    const token = localStorage.getItem("token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
+  const fetchRooms = useCallback(async () => {
+    if (!ROUTES.rooms) {
+      pushSystemMessage({
+        type: "error",
+        text: "ROUTES.rooms 값을 먼저 설정해주세요.",
+      });
       return;
     }
 
-    const newSocket = io(SOCKET_URL, {
+    setRoomsLoading(true);
+    try {
+      const { data } = await axios.get(ROUTES.rooms, {
+        headers: authHeaders(),
+      });
+      const list = data.rooms || data;
+      setRooms(list);
+      setActiveRoomId((prev) => prev ?? list[0]?.id ?? null);
+    } catch (error) {
+      pushSystemMessage({
+        type: "error",
+        text: "채팅방 목록을 불러오지 못했습니다.",
+      });
+    } finally {
+      setRoomsLoading(false);
+    }
+  }, [pushSystemMessage]);
+
+  const fetchMessages = useCallback(
+    async (roomId) => {
+      const targetRoute = ROOM_MESSAGES_ROUTE(roomId);
+      if (!targetRoute) {
+        pushSystemMessage({
+          type: "error",
+          text: "ROOM_MESSAGES_ROUTE 함수를 먼저 설정해주세요.",
+        });
+        return;
+      }
+
+      setMessageLoading(true);
+      try {
+        const { data } = await axios.get(targetRoute, {
+          headers: authHeaders(),
+        });
+        const list = normalizeMessages(data.messages || data, roomId);
+        setMessages((prev) => ({ ...prev, [roomId]: list }));
+        requestAnimationFrame(() => scrollToBottom());
+      } catch (error) {
+        pushSystemMessage({
+          type: "error",
+          text: "메시지를 불러오지 못했습니다.",
+        });
+      } finally {
+        setMessageLoading(false);
+      }
+    },
+    [pushSystemMessage, scrollToBottom]
+  );
+
+  const handleSendMessage = (event) => {
+    event.preventDefault();
+    const trimmed = composer.trim();
+    if (!trimmed || !activeRoomId || !currentUser || !socketRef.current) return;
+
+    setIsSending(true);
+    socketRef.current.emit("sendMessage", {
+      roomId: activeRoomId,
+      userId: currentUser.id,
+      content: trimmed,
+    });
+    setComposer("");
+    setIsSending(false);
+  };
+
+  const handleCreateRoom = async (event) => {
+    event.preventDefault();
+    const value = quickRoomName.trim();
+    if (!value) return;
+
+    if (!ROUTES.createRoom) {
+      pushSystemMessage({
+        type: "error",
+        text: "ROUTES.createRoom 값을 먼저 설정해주세요.",
+      });
+      return;
+    }
+
+    setIsCreatingRoom(true);
+    try {
+      await axios.post(
+        ROUTES.createRoom,
+        { name: value },
+        { headers: authHeaders() }
+      );
+      setQuickRoomName("");
+      await fetchRooms();
+      pushSystemMessage({
+        type: "success",
+        text: `새 채팅방 '${value}'을 만들었습니다.`,
+      });
+    } catch (error) {
+      pushSystemMessage({
+        type: "error",
+        text: error?.response?.data?.message || "채팅방 생성에 실패했습니다.",
+      });
+    } finally {
+      setIsCreatingRoom(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!ROUTES.me) {
+      pushSystemMessage({
+        type: "warning",
+        text: "ROUTES.me 값을 설정하면 사용자 정보를 표시할 수 있어요.",
+      });
+      return;
+    }
+
+    axios
+      .get(ROUTES.me, { headers: authHeaders() })
+      .then((res) => setCurrentUser(res.data.user || res.data))
+      .catch(() => {
+        pushSystemMessage({
+          type: "error",
+          text: "사용자 정보를 불러오지 못했습니다.",
+        });
+      });
+  }, [pushSystemMessage]);
+
+  useEffect(() => {
+    fetchRooms();
+  }, [fetchRooms]);
+
+  useEffect(() => {
+    activeRoomRef.current = activeRoomId;
+  }, [activeRoomId]);
+
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token || !SOCKET_SERVER_URL) return;
+
+    const socket = io(SOCKET_SERVER_URL, {
       auth: { token },
       reconnection: true,
       reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
     });
 
-    setSocket(newSocket);
+    socketRef.current = socket;
 
-    const handleConnect = () => {
-      setIsConnected(true);
-      setStatusMessage(null);
-    };
-    const handleDisconnect = () => {
-      setIsConnected(false);
-      setStatusMessage({ type: "warning", text: "서버와 연결이 끊어졌습니다. 재연결 중..." });
-    };
-    const handleUnauthorized = (payload) => {
-      if (navigatedRef.current) return;
-      navigatedRef.current = true;
-
-      const msg = payload?.message || "인증에 실패했습니다. 로그인 페이지로 이동합니다.";
-      alert(msg);
-      localStorage.removeItem("token");
-
-      try {
-        navigate("/login");
-      } catch (e) {
-        window.location.href = "/login";
-      }
-    };
-    const handleError = (payload) => {
-      setStatusMessage({ type: "error", text: payload.message || "알 수 없는 오류가 발생했습니다." });
-    };
-    const handleReceive = (msg) => {
-      if (!msg?.roomId) {
-        return;
-      }
-      setMessagesByRoom((prev) => {
-        const prevMessages = prev[msg.roomId] || [];
-        const updatedMessages = [...prevMessages, msg];
-        // Update localStorage cache
-        try {
-          localStorage.setItem(`messages_room_${msg.roomId}`, JSON.stringify(updatedMessages));
-        } catch (e) {
-          console.error("localStorage 저장 실패", e);
-        }
-        return {
-          ...prev,
-          [msg.roomId]: updatedMessages,
-        };
-      });
-    };
-
-    newSocket.on("connect", handleConnect);
-    newSocket.on("disconnect", handleDisconnect);
-    newSocket.on("unauthorized", handleUnauthorized);
-    newSocket.on("errorMessage", handleError);
-    newSocket.on("receiveMessage", handleReceive);
-
-    return () => {
-      newSocket.off("connect", handleConnect);
-      newSocket.off("disconnect", handleDisconnect);
-      newSocket.off("unauthorized", handleUnauthorized);
-      newSocket.off("errorMessage", handleError);
-      newSocket.off("receiveMessage", handleReceive);
-      newSocket.disconnect();
-    };
-  }, []);
-
-  useEffect(() => {
-    const token = tokenRef.current;
-    if (!token) {
-      return;
-    }
-
-    const fetchInitialData = async () => {
-      try {
-        const [profileRes, roomsRes] = await Promise.all([
-          axios.get("http://localhost:4000/api/auth/me", axiosAuthConfig),
-          axios.get("http://localhost:4000/api/rooms", axiosAuthConfig),
-        ]);
-
-        setCurrentUser(profileRes.data);
-        setRooms(roomsRes.data);
-
-        if (roomsRes.data.length > 0) {
-          setActiveRoomId((prev) => {
-            if (prev && roomsRes.data.some((room) => room.id === prev)) {
-              return prev;
-            }
-            return roomsRes.data[0].id;
-          });
-        }
-      } catch (err) {
-        console.error("채팅 초기 데이터 로드 실패", err);
-        setStatusMessage({ type: "error", text: "채팅 정보를 불러오지 못했습니다." });
-      }
-    };
-
-    fetchInitialData();
-  }, [axiosAuthConfig]);
-
-  const roomIdParam = searchParams.get("roomId");
-
-  useEffect(() => {
-    if (!rooms.length) {
-      return;
-    }
-
-    const parsedParam = roomIdParam ? Number(roomIdParam) : null;
-    if (parsedParam && !Number.isNaN(parsedParam)) {
-      const exists = rooms.some((room) => room.id === parsedParam);
-      if (exists && parsedParam !== activeRoomId) {
-        setActiveRoomId(parsedParam);
-        return;
-      }
-    }
-
-    if (!activeRoomId) {
-      setActiveRoomId(rooms[0].id);
-    }
-  }, [rooms, roomIdParam, activeRoomId]);
-
-  useEffect(() => {
-    if (!socket || !activeRoomId) {
-      return;
-    }
-
-    socket.emit("joinRoom", activeRoomId);
-    console.log(`📩 ${socket.id}가 ${activeRoomId} 방에 입장`);
-
-    // Load cached messages from localStorage first
-    const cachedMessages = localStorage.getItem(`messages_room_${activeRoomId}`);
-    if (cachedMessages) {
-      try {
-        const parsedMessages = JSON.parse(cachedMessages);
-        setMessagesByRoom((prev) => ({
-          ...prev,
-          [activeRoomId]: parsedMessages,
-        }));
-        setMessagesLoaded((prev) => ({
-          ...prev,
-          [activeRoomId]: true,
-        }));
-      } catch (e) {
-        console.error("localStorage 메시지 파싱 실패", e);
-      }
-    }
-
-    // Fallback fetch if messages are missing or empty in localStorage
-    if (!messagesLoaded[activeRoomId] || !cachedMessages) {
-      const fetchMessages = async () => {
-        try {
-          const { data } = await axios.get(
-            `http://localhost:4000/api/rooms/${activeRoomId}/messages`,
-            axiosAuthConfig
-          );
-
-          setMessagesByRoom((prev) => {
-            // Update localStorage cache
-            try {
-              localStorage.setItem(`messages_room_${activeRoomId}`, JSON.stringify(data));
-            } catch (e) {
-              console.error("localStorage 저장 실패", e);
-            }
-            return {
-              ...prev,
-              [activeRoomId]: data,
-            };
-          });
-          setMessagesLoaded((prev) => ({
-            ...prev,
-            [activeRoomId]: true,
-          }));
-        } catch (err) {
-          console.error("메세지 로드 실패", err);
-          setStatusMessage({ type: "error", text: "채팅 기록을 불러오지 못했습니다." });
-        }
-      };
-
-      fetchMessages();
-    }
-
-    return () => {
-      socket.emit("leaveRoom", activeRoomId);
-      console.log(`🚪 ${socket.id}가 ${activeRoomId} 방을 나감`);
-    };
-  }, [socket, activeRoomId]);
-
-  useEffect(() => {
-    if (activeMessages.length === 0) {
-      return;
-    }
-    const timeout = setTimeout(scrollToBottom, 100);
-    return () => clearTimeout(timeout);
-  }, [activeMessages, scrollToBottom]);
-
-  const handleSendMessage = async (event) => {
-    event.preventDefault();
-    const trimmed = message.trim();
-    if (!trimmed || !socket || !activeRoomId || !isConnected) {
-      return;
-    }
-
-    const user = JSON.parse(localStorage.getItem("user"));
-    const userId = user?.id;
-
-    const tempId = `temp-${Date.now()}`;
-
-    const newMessage = {
-      id: tempId,
-      roomId: activeRoomId,
-      userId: userId,
-      content: trimmed,
-      username: currentUser?.username || `유저 ${userId}`,
-      created_at: new Date().toISOString(),
-      temp: true,
-    };
-
-    // Optimistically add message to UI
-    setMessagesByRoom((prev) => {
-      const prevMessages = prev[activeRoomId] || [];
-      const updatedMessages = [...prevMessages, newMessage];
-      try {
-        localStorage.setItem(`messages_room_${activeRoomId}`, JSON.stringify(updatedMessages));
-      } catch (e) {
-        console.error("localStorage 저장 실패", e);
-      }
-      return {
+    socket.on("connect", () => setSocketStatus("connected"));
+    socket.on("disconnect", () => setSocketStatus("disconnected"));
+    socket.on("newMessage", (payload) => {
+      const message = normalizeMessage(payload, payload.roomId);
+      if (!message?.roomId) return;
+      setMessages((prev) => ({
         ...prev,
-        [activeRoomId]: updatedMessages,
-      };
-    });
+        [message.roomId]: [...(prev[message.roomId] || []), message],
+      }));
 
-    setMessage("");
-
-    // Emit message to server
-    socket.emit("sendMessage", newMessage, (response) => {
-      // On server confirmation, replace temp message with confirmed message
-      if (response && response.id) {
-        setMessagesByRoom((prev) => {
-          const prevMessages = prev[activeRoomId] || [];
-          const filteredMessages = prevMessages.filter((msg) => msg.id !== tempId);
-          const updatedMessages = [...filteredMessages, response];
-          try {
-            localStorage.setItem(`messages_room_${activeRoomId}`, JSON.stringify(updatedMessages));
-          } catch (e) {
-            console.error("localStorage 저장 실패", e);
-          }
-          return {
-            ...prev,
-            [activeRoomId]: updatedMessages,
-          };
-        });
+      if (activeRoomRef.current === message.roomId) {
+        requestAnimationFrame(() => scrollToBottom());
       }
     });
-  };
 
-  const handleSelectRoom = (roomId) => {
-    setActiveRoomId(roomId);
-    setSidebarOpen(false);
-  };
+    socket.on("systemMessage", (payload) => {
+      pushSystemMessage({
+        type: payload.type || "info",
+        text: payload.text,
+        time: payload.time,
+      });
+    });
 
-  const formatTimestamp = (value) => {
-    if (!value) return "";
-    try {
-      return new Intl.DateTimeFormat("ko", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(new Date(value));
-    } catch (err) {
-      return "";
-    }
-  };
-
-  const renderMessage = (msg, index) => {
-    const isOwn = currentUser && msg.userId === currentUser.id;
-    const uniqueKey = msg.id || `${msg.userId || "anon"}-${msg.created_at || Date.now()}-${index}`;
-
-    return (
-      <div key={uniqueKey} className={`chat-message ${isOwn ? "chat-message--own" : ""}`}>
-        <div className="chat-message-header">
-          <span className="chat-message-user">{msg.username || `유저 ${msg.userId}`}</span>
-          <span className="chat-message-time">{formatTimestamp(msg.created_at)}</span>
-        </div>
-        <div className="chat-message-bubble">{msg.content}</div>
-      </div>
-    );
-  };
+    return () => {
+      socket.disconnect();
+    };
+  }, [pushSystemMessage, scrollToBottom]);
 
   useEffect(() => {
     if (!activeRoomId) return;
-
-    const currentParam = searchParams.get("roomId");
-
-    if (currentParam === String(activeRoomId)) return;
-
-    setSearchParams({ roomId: String(activeRoomId) }, { replace: true });
-
-  }, [activeRoomId]);
-
-  const filteredRooms = rooms.filter((room) => {
-    if (!roomSearch.trim()) {
-      return true;
+    fetchMessages(activeRoomId);
+    if (socketRef.current) {
+      socketRef.current.emit("joinRoom", activeRoomId);
     }
-    const keyword = roomSearch.trim().toLowerCase();
-    return (
-      room.name.toLowerCase().includes(keyword) ||
-      (room.description ? room.description.toLowerCase().includes(keyword) : false)
-    );
-  });
+    setSidebarOpen(false);
+  }, [activeRoomId, fetchMessages]);
 
-  useEffect(() => {
-    if (!socket) return;
-    const handleUpdateMessages = (msgs) => {
-      console.log("📩 서버에서 불러온 메시지:", msgs);
-      setMessagesByRoom((prev) => ({
-        ...prev,
-        [activeRoomId]: msgs,
-      }));
-      try {
-        localStorage.setItem(`messages_room_${activeRoomId}`, JSON.stringify(msgs));
-      } catch (e) {
-        console.error("localStorage 저장 실패", e);
-      }
-    };
-    socket.on("updateMessages", handleUpdateMessages);
-    return () => {
-      socket.off("updateMessages", handleUpdateMessages);
-    };
-  }, [socket, activeRoomId]);
+  const filteredRooms = useMemo(() => {
+    return rooms.filter((room) =>
+      room.name.toLowerCase().includes(search.toLowerCase())
+    );
+  }, [rooms, search]);
+
+  const activeRoom = rooms.find((room) => room.id === activeRoomId) || null;
+  const activeMessages = activeRoomId ? messages[activeRoomId] || [] : [];
+
+  const connectionClass =
+    socketStatus === "connected"
+      ? "chat-connection chat-connection--online"
+      : "chat-connection chat-connection--offline";
 
   return (
     <div className="chat-layout">
       <aside className={`chat-sidebar ${sidebarOpen ? "chat-sidebar--open" : ""}`}>
         <div className="chat-sidebar-header">
-          <h2>채널</h2>
-          <button className="chat-sidebar-close" onClick={() => setSidebarOpen(false)}>
+          <h2>채팅방</h2>
+          <button
+            className="chat-sidebar-close"
+            onClick={() => setSidebarOpen(false)}
+            type="button"
+          >
             ✕
           </button>
         </div>
@@ -402,115 +327,160 @@ function ChatPage() {
         <div className="chat-room-search">
           <input
             type="search"
-            placeholder="채널 검색 (#이름, 설명)"
-            value={roomSearch}
-            onChange={(e) => setRoomSearch(e.target.value)}
+            placeholder="채팅방 검색"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
           />
         </div>
 
         <div className="chat-room-list">
-          {filteredRooms.map((room) => (
-            <button
-              key={room.id}
-              className={`chat-room-item ${room.id === activeRoomId ? "is-active" : ""}`}
-              onClick={() => handleSelectRoom(room.id)}
-            >
-              <span className="chat-room-name"># {room.name}</span>
-              {room.description && <span className="chat-room-desc">{room.description}</span>}
-            </button>
-          ))}
-          {rooms.length === 0 && <p className="chat-room-empty">아직 생성된 채널이 없습니다.</p>}
-          {rooms.length > 0 && filteredRooms.length === 0 && (
-            <p className="chat-room-empty">일치하는 채널이 없습니다.</p>
+          {roomsLoading ? (
+            <p className="chat-room-empty">채팅방을 불러오는 중입니다...</p>
+          ) : filteredRooms.length === 0 ? (
+            <p className="chat-room-empty">조건에 맞는 채팅방이 없어요.</p>
+          ) : (
+            filteredRooms.map((room) => (
+              <button
+                key={room.id}
+                type="button"
+                className={`chat-room-item ${
+                  room.id === activeRoomId ? "is-active" : ""
+                }`}
+                onClick={() => setActiveRoomId(room.id)}
+              >
+                <span className="chat-room-name">#{room.name}</span>
+                <span className="chat-room-desc">실시간 대화</span>
+              </button>
+            ))
           )}
         </div>
+
+        <form className="chat-room-quick" onSubmit={handleCreateRoom}>
+          <input
+            type="text"
+            placeholder="새 채팅방 이름"
+            value={quickRoomName}
+            onChange={(event) => setQuickRoomName(event.target.value)}
+          />
+          <button type="submit" disabled={isCreatingRoom}>
+            {isCreatingRoom ? "생성 중" : "추가"}
+          </button>
+        </form>
       </aside>
 
-      <main className="chat-main">
-        <header className="chat-main-header">
-          <button className="chat-sidebar-toggle" onClick={() => setSidebarOpen((prev) => !prev)}>
-            ☰
-          </button>
-          {activeRoom ? (
-            <div className="chat-room-info">
-              <h1># {activeRoom.name}</h1>
-              <p>{activeRoom.description || "모두가 함께 이야기하는 공간"}</p>
-            </div>
-          ) : (
-            <div className="chat-room-info">
-              <h1>채널을 선택하세요</h1>
-              <p>왼쪽에서 대화할 채널을 선택하거나 새 채널을 만들어보세요.</p>
-            </div>
-          )}
-
+      <section className="chat-main">
+        <div className="chat-main-header">
+          <div className="chat-room-info">
+            <h1>{activeRoom ? `# ${activeRoom.name}` : "채팅방을 선택해주세요"}</h1>
+            <p>
+              {activeRoom
+                ? "실시간으로 이웃과 이야기를 나눠보세요."
+                : "왼쪽 목록에서 방을 선택하거나 새로 만들어보세요."}
+            </p>
+          </div>
           <div className="chat-header-actions">
+            <span className={connectionClass}>
+              <span className="chat-connection-dot" />
+              {socketStatus === "connected" ? "실시간 연결" : "오프라인"}
+            </span>
             <button
               type="button"
-              className="btn btn-light"
-              onClick={() => navigate("/channels/new")}
+              className="chat-sidebar-toggle"
+              onClick={() => setSidebarOpen(true)}
             >
-              + 새 채널
+              방 목록
             </button>
-            <div className={`chat-connection ${isConnected ? "chat-connection--online" : "chat-connection--offline"}`}>
-              <span className="chat-connection-dot" />
-              {isConnected ? "실시간" : "연결 중"}
-            </div>
           </div>
-        </header>
-
-        {statusMessage && (
-          <div className={`chat-banner chat-banner--${statusMessage.type || "info"}`}>
-            {statusMessage.text}
-          </div>
-        )}
+        </div>
 
         <div className="chat-window">
+          {messageLoading && (
+            <div className="chat-banner chat-banner--info">메시지를 불러오는 중입니다...</div>
+          )}
+
           <div className="chat-messages" ref={messageListRef}>
-            {activeRoom ? (
-              activeMessages.length > 0 ? (
-                activeMessages.map(renderMessage)
-              ) : (
-                <div className="chat-empty">
-                  <h3>대화를 시작해보세요</h3>
-                  <p>첫 메시지를 남겨 이 채널을 활기차게 만들어보세요!</p>
-                </div>
-              )
-            ) : (
+            {!activeRoomId ? (
               <div className="chat-empty">
-                <h3>채널을 선택해 주세요</h3>
-                <p>채널을 만들거나 선택하면 메시지가 여기 표시됩니다.</p>
+                <h3>채팅방을 선택해주세요</h3>
+                <p>왼쪽에서 방을 선택하거나 새 방을 만들 수 있어요.</p>
               </div>
+            ) : activeMessages.length === 0 ? (
+              <div className="chat-empty">
+                <h3>아직 메시지가 없어요</h3>
+                <p>첫 메시지를 보내 대화를 시작해보세요.</p>
+              </div>
+            ) : (
+              activeMessages.map((msg) => (
+                <div
+                  key={msg.id || `${msg.userId}-${msg.createdAt}`}
+                  className={`chat-message ${
+                    msg.userId === currentUser?.id ? "chat-message--own" : ""
+                  }`}
+                >
+                  <div className="chat-message-header">
+                    <span className="chat-message-user">
+                      {msg.username || "이웃"}
+                    </span>
+                    <span>{formatMessageTime(msg.createdAt)}</span>
+                  </div>
+                  <div className="chat-message-bubble">{msg.content}</div>
+                </div>
+              ))
             )}
           </div>
 
-          <form className="chat-input" onSubmit={handleSendMessage}>
-            <textarea
-              rows={1}
-              placeholder={activeRoom ? "메시지를 입력하세요..." : "채널을 먼저 선택하거나 생성하세요."}
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={(e) => {
-                const isComposing = e.nativeEvent.isComposing || e.keyCode === 229;
-                if (isComposing) {
-                  return;
-                }
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSendMessage(e);
-                }
-              }}
-              disabled={!activeRoom || !socket || !isConnected}
-            />
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={!message.trim() || !activeRoom || !socket || !isConnected}
-            >
-              전송
-            </button>
-          </form>
+          {activeRoomId && (
+            <form className="chat-input" onSubmit={handleSendMessage}>
+              <textarea
+                placeholder="메시지를 입력해주세요..."
+                value={composer}
+                onChange={(event) => setComposer(event.target.value)}
+                rows={1}
+              />
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={!composer.trim() || isSending}
+              >
+                {isSending ? "전송 중..." : "전송"}
+              </button>
+            </form>
+          )}
         </div>
-      </main>
+      </section>
+
+      <aside className="chat-sidepanel">
+        <div className="chat-sidepanel-card">
+          <div className="chat-sidepanel-header">
+            <h3>라이브 알림</h3>
+            <button type="button" onClick={() => setSystemFeed([])}>
+              초기화
+            </button>
+          </div>
+          <ul className="chat-feed">
+            {systemFeed.length === 0 ? (
+              <li>아직 알림이 없습니다.</li>
+            ) : (
+              systemFeed.map((item, index) => (
+                <li key={`${item.time}-${index}`}>
+                  <p>{item.text}</p>
+                  <span>{formatFeedTime(item.time)}</span>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+
+        <div className="chat-tip-card">
+          <p className="chat-tip-eyebrow">내 상태</p>
+          <h4>{currentUser?.nickname || currentUser?.username || "이웃"} 님</h4>
+          <p className="chat-tip-muted">{currentUser?.email || "이메일 미확인"}</p>
+          <ul>
+            <li>현재 방: {activeRoom ? `#${activeRoom.name}` : "미선택"}</li>
+            <li>메시지 수: {activeMessages.length}</li>
+          </ul>
+        </div>
+      </aside>
     </div>
   );
 }
