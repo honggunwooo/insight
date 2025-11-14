@@ -1,9 +1,9 @@
-import { UserModel } from "../models/UserModel";
+import { UserModel } from "../models/AuthModel";
 import { hashPassword, comparePassword } from "../utils/password";
 import { generateToken } from "../utils/jwt";
 
 export const AuthService = {
-  async register(email: string, password: string, nickname: string) {
+  async signup(email: string, password: string, nickname: string) {
     const existing = await UserModel.findByEmail(email);
     if (existing) throw new Error("이미 존재하는 이메일입니다.");
 

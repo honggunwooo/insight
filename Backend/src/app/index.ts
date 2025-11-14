@@ -3,15 +3,19 @@ import express from "express";
 import { createServer } from "http";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import { initializeSocket } from "../config/socket";
+import { setupSwagger } from "../config/swagger";
+import dotenv from "dotenv";
 import connectDB from "../config/mysql";
-import v1Router from "./route";                    
-import router from "./v1/auth/route";
+import { initializeSocket } from "../config/socket";
+import { TspecDocsMiddleware } from "tspec";
+import route from "./route";
+
+dotenv.config();
+
 const app = express();
 const server = createServer(app);
 const PORT = process.env.PORT || 4000;
 
-app.use("/api", router)
 
 app.use(
   cors({
@@ -28,22 +32,28 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 
-app.get("/", (req, res) => {
-  res.send("🚀 Insight Backend Server is running!");
+// Favicon route
+app.get('/favicon.ico', (req, res) => {
+    res.status(204).end();
 });
 
-app.use("/api/v1", v1Router);
+app.get('/', (req, res) => {
+    res.status(204).end();
+});
+
+// Swagger 설정
+setupSwagger(app);
+
+app.use("/api", route);
 
 (async () => {
-  try {
     await connectDB();
-    console.log("✅ MySQL Database connected.");
+    app.use("/docs", TspecDocsMiddleware);
 
     initializeSocket(server);
-    server.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
+
+    const port = +(process.env.PORT ?? 8080);
+    server.listen(port, "0.0.0.0", () => {
+        console.log(`Server Start, port : ${port}`);
     });
-  } catch (err) {
-    console.error("❌ Server startup failed:", err);
-  }
 })();

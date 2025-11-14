@@ -1,28 +1,21 @@
 import { Request, Response } from "express";
 import { AuthService } from "../services/AuthService";
-import catchAsyncErrors from "../utils/catchAsyncError";
 
 export const AuthController = {
-  register: catchAsyncErrors(async (req: Request, res: Response) => {
+  async signup(req: Request, res: Response) {
     const { email, password, nickname } = req.body;
-    const result = await AuthService.register(email, password, nickname);
-    res.status(201).json(result);
-  }, (err, res) => {
-    res.status(400).json({ success: false, message: (err as Error).message });
-  }),
+    const result = await AuthService.signup(email, password, nickname);
+    res.status(201).json({ success: true, ...result });
+  },
 
-  login: catchAsyncErrors(async (req: Request, res: Response) => {
+  async login(req: Request, res: Response) {
     const { email, password } = req.body;
     const result = await AuthService.login(email, password);
-    res.status(200).json(result);
-  }, (err, res) => {
-    res.status(400).json({ success: false, message: (err as Error).message });
-  }),
+    res.status(200).json({ success: true, ...result });
+  },
 
-  logout: catchAsyncErrors(async (req: Request, res: Response) => {
+  async logout(_req: Request, res: Response) {
     const result = await AuthService.logout();
-    res.status(200).json(result);
-  }, (err, res) => {
-    res.status(500).json({ success: false, message: "로그아웃 실패" });
-  }),
+    res.status(200).json({ success: true, ...result });
+  },
 };

@@ -23,19 +23,4 @@ export const UserModel = {
       [user.email, user.password, user.nickname]
     );
   },
-
-  async update(id: number, updates: Partial<User>): Promise<void> {
-    const fields = Object.keys(updates)
-      .map((key) => `${key} = ?`)
-      .join(", ");
-    const values = Object.values(updates);
-    const pool = getPool();
-    if (fields.length > 0)
-      await pool.query(`UPDATE users SET ${fields} WHERE id = ?`, [...values, id]);
-  },
-
-  async delete(id: number): Promise<void> {
-    const pool = getPool();
-    await pool.query("DELETE FROM users WHERE id = ?", [id]);
-  },
 };
