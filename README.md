@@ -156,5 +156,4 @@ npm run dev            # http://localhost:5173
 
 ## 8. Author
 - 홍건우 (2025.09 ~ 2025.10)  
-- 문의: honggunwoo.dev@gmail.com (예시)
 
