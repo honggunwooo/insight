@@ -10,8 +10,14 @@ export const RoomController = {
     res.status(201).json({ success: true, room });
   },
   // 방 조회
-  async getAll(_req: AuthRequest, res: Response) {
-    const rooms = await RoomService.getAllRooms();
+  async getAll(req: AuthRequest, res: Response) {
+    const search = typeof req.query.search === "string" ? req.query.search : undefined;
+    const rooms = await RoomService.getAllRooms(search);
+    res.status(200).json({ success: true, rooms });
+  },
+  async getMine(req: AuthRequest, res: Response) {
+    const search = typeof req.query.search === "string" ? req.query.search : undefined;
+    const rooms = await RoomService.getRoomsForUser(req.user!.id, search);
     res.status(200).json({ success: true, rooms });
   },
   // 방 전체 조회

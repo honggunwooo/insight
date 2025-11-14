@@ -14,8 +14,15 @@ export const UserController = {
     // 내 정보 수정
     async updateProfile(req: AuthRequest, res: Response) {
         const userId = req.user!.id;
-        const { nickname, password } = req.body;
-        const result = await UserService.updateProfile(userId, nickname, password);
+        const { nickname, password, location, bio, interests } = req.body;
+        const result = await UserService.updateProfile(
+            userId,
+            nickname,
+            password,
+            location,
+            bio,
+            interests
+        );
         res.status(200).json({ success: true, ...result });
     },
 

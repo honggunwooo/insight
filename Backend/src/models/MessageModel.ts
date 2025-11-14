@@ -41,4 +41,39 @@ export const MessageModel = {
     );
     return rows;
   },
+
+  async searchInRoom(roomId: number, term: string) {
+    const pool = getPool();
+    const like = `%${term}%`;
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `${SELECT_BASE} WHERE m.room_id = ? AND m.content LIKE ? ORDER BY m.created_at ASC`,
+      [roomId, like]
+    );
+    return rows;
+  },
+
+  async getLatest(roomId: number) {
+    const pool = getPool();
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `${SELECT_BASE} WHERE m.room_id = ? ORDER BY m.id DESC LIMIT 1`,
+      [roomId]
+    );
+    return rows[0] || null;
+  },
+
+  async countUnread(roomId: number, lastReadId?: number | null) {
+    const pool = getPool();
+    if (!lastReadId) {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        "SELECT COUNT(*) AS cnt FROM messages WHERE room_id = ?",
+        [roomId]
+      );
+      return (rows[0]?.cnt as number) || 0;
+    }
+    const [rows] = await pool.query<RowDataPacket[]>(
+      "SELECT COUNT(*) AS cnt FROM messages WHERE room_id = ? AND id > ?",
+      [roomId, lastReadId]
+    );
+    return (rows[0]?.cnt as number) || 0;
+  },
 };

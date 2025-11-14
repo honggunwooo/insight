@@ -11,13 +11,23 @@ export const UserService = {
     return safeUser;
   },
 
-  async updateProfile(userId: number, nickname?: string, password?: string) {
+  async updateProfile(
+    userId: number,
+    nickname?: string,
+    password?: string,
+    location?: string,
+    bio?: string,
+    interests?: string
+  ) {
     const user = await UserModel.findById(userId);
     if (!user) throw new Error("사용자를 찾을 수 없습니다.");
 
     const updates: any = {};
     if (nickname) updates.nickname = nickname;
     if (password) updates.password = await hashPassword(password);
+    if (location !== undefined) updates.location = location || null;
+    if (bio !== undefined) updates.bio = bio || null;
+    if (interests !== undefined) updates.interests = interests || null;
 
     await UserModel.update(userId, updates);
     return { message: "프로필이 수정되었습니다." };
