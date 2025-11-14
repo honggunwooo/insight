@@ -2,6 +2,7 @@ import express from "express";
 import { UserController } from "../../../controllers/UserController";
 import { authMiddleware } from "../../../middleware/auth";
 import catchAsyncErrors from "../../../utils/catchAsyncError";
+import { avatarUpload } from "../../../middleware/upload";
 
 const userRouter = express.Router();
 
@@ -77,5 +78,12 @@ userRouter.patch("/me", authMiddleware, catchAsyncErrors(UserController.updatePr
  *         description: 인증 실패
  */
 userRouter.delete("/me", authMiddleware, catchAsyncErrors(UserController.deleteAccount));
+
+userRouter.post(
+  "/me/avatar",
+  authMiddleware,
+  avatarUpload.single("avatar"),
+  catchAsyncErrors(UserController.uploadAvatar)
+);
 
 export default userRouter;

@@ -1,5 +1,6 @@
 import express from "express";
 import { RoomController } from "../../../controllers/RoomController";
+import { MessageController } from "../../../controllers/MessageController";
 import { authMiddleware } from "../../../middleware/auth";
 import catchAsyncErrors from "../../../utils/catchAsyncError";
 
@@ -172,5 +173,24 @@ roomRouter.get("/:id", catchAsyncErrors(RoomController.getOne));
  *         description: 채팅방을 찾을 수 없음
  */
 roomRouter.delete("/:id", authMiddleware, catchAsyncErrors(RoomController.delete));
+
+/**
+ * @swagger
+ * /rooms/{id}/messages:
+ *   get:
+ *     summary: 특정 방의 메시지 조회
+ *     tags: [Rooms]
+ *   post:
+ *     summary: 특정 방에 메시지 작성
+ *     tags: [Rooms]
+ *     security:
+ *       - bearerAuth: []
+ */
+roomRouter.get("/:id/messages", catchAsyncErrors(MessageController.getByRoom));
+roomRouter.post(
+  "/:id/messages",
+  authMiddleware,
+  catchAsyncErrors(MessageController.create)
+);
 
 export default roomRouter;

@@ -1,8 +1,10 @@
 import { Request, Response, NextFunction } from "express";
+import type { UploadedFile } from "./upload";
 import jwt from "jsonwebtoken";
 
 export interface AuthRequest extends Request {
   user?: { id: number; email: string };
+  file?: UploadedFile;
 }
 
 export const authMiddleware = (req: AuthRequest, res: Response, next: NextFunction) => {

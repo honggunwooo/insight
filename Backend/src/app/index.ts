@@ -3,6 +3,7 @@ import express from "express";
 import { createServer } from "http";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import path from "path";
 import { setupSwagger } from "../config/swagger";
 import dotenv from "dotenv";
 import connectDB from "../config/mysql";
@@ -20,8 +21,8 @@ const PORT = process.env.PORT || 4000;
 app.use(
   cors({
     origin: [
-      "http://localhost:3000",
-      "http://127.0.0.1:3000",
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
     ],
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -31,6 +32,10 @@ app.use(
 
 app.use(express.json());
 app.use(cookieParser());
+app.use(
+  "/uploads",
+  express.static(path.resolve(process.cwd(), "uploads"))
+);
 
 // Favicon route
 app.get('/favicon.ico', (req, res) => {

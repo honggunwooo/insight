@@ -1,28 +1,40 @@
-import { Server as HTTPServer } from "http";
-import { Server as SocketIOServer, Socket } from "socket.io";
+import { Server } from "socket.io";
+import { ChatService } from "../services/MessageService";
 
-let io: SocketIOServer;
-
-export const initializeSocket = (server: HTTPServer) => {
-  io = new SocketIOServer(server, {
+export function initializeSocket(server: any) {
+  const io = new Server(server, {
     cors: {
-      origin: ["http://localhost:3000"],
+      origin: [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+      ],
       methods: ["GET", "POST"],
       credentials: true,
     },
   });
 
-  io.on("connection", (socket: Socket) => {
-    console.log(`✅ Client connected: ${socket.id}`);
+  io.on("connection", (socket) => {
+    console.log(`🟢 User connected: ${socket.id}`);
 
-    socket.on("chatMessage", (msg: string) => {
-      io.emit("chatMessage", msg);
+    socket.on("joinRoom", (roomId) => {
+      socket.join(`room_${roomId}`);
+      console.log(`✅ User joined room ${roomId}`);
+    });
+
+    socket.on("sendMessage", async ({ roomId, userId, content }) => {
+      if (!content?.trim()) return;
+
+      const message = await ChatService.saveMessage(roomId, userId, content.trim());
+      if (!message) return;
+
+      io.to(`room_${roomId}`).emit("newMessage", message);
     });
 
     socket.on("disconnect", () => {
-      console.log(`❌ Client disconnected: ${socket.id}`);
+      console.log(`🔴 User disconnected: ${socket.id}`);
     });
   });
 
   console.log("🟢 Socket initialized");
-};
+  return io;
+}
