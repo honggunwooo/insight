@@ -4,6 +4,7 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 const links = [
   { to: "/", label: "홈" },
   { to: "/chat", label: "채팅" },
+  { to: "/rooms/discover", label: "방 둘러보기", private: true },
   { to: "/channels/new", label: "채널 만들기", private: true },
   { to: "/rooms/manage", label: "방 관리", private: true },
 ];

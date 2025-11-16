@@ -7,6 +7,7 @@ import ChatPage from "./pages/ChatPage.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
 import ChannelCreatePage from "./pages/ChannelCreatePage.jsx";
 import RoomList from "./pages/RoomList.jsx";
+import RoomsDiscoverPage from "./pages/RoomsDiscoverPage.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import "./index.css";
 import "./App.css";
@@ -21,7 +22,7 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route
-            path="/chat"
+            path="/chat/:roomId?"
             element={
               <ProtectedRoute>
                 <ChatPage />
@@ -49,6 +50,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <RoomList />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/rooms/discover"
+            element={
+              <ProtectedRoute>
+                <RoomsDiscoverPage />
               </ProtectedRoute>
             }
           />
