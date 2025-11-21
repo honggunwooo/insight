@@ -15,7 +15,7 @@ dotenv.config();
 
 const app = express();
 const server = createServer(app);
-const PORT = process.env.PORT || 80;
+const PORT = process.env.PORT || 4000;
 
 
 app.use(
